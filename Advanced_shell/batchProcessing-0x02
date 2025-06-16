@@ -1,14 +1,63 @@
+# #!/bin/bash
+
+# # Script to fetch data for multiple Pokémon from Pokémon API, save to separate JSON files, and handle rate-limiting
+
+# # Define constants
+# BASE_API_URL="https://pokeapi.co/api/v2/pokemon"
+# ERROR_FILE="errors.txt"
+# TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+# # List of Pokémon
+# POKEMON_LIST=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
+
+# # Check if curl is installed
+# if ! command -v curl &> /dev/null; then
+#     echo "$TIMESTAMP: Error: curl is not installed." >> "$ERROR_FILE"
+#     exit 1
+# fi
+
+# # Loop through each Pokémon
+# for pokemon in "${POKEMON_LIST[@]}"; do
+#     # Define output file and API URL
+#     OUTPUT_FILE="${pokemon}.json"
+#     API_URL="${BASE_API_URL}/${pokemon}"
+
+#     # Make API request and capture response and HTTP status code
+#     response=$(curl -s -L -w "%{http_code}" -o "$OUTPUT_FILE" "$API_URL" 2>&1)
+#     http_status=${response##* }
+#     curl_exit_code=$?
+
+#     # Check for curl errors
+#     if [ $curl_exit_code -ne 0 ]; then
+#         echo "$TIMESTAMP: Error: curl failed for $pokemon with exit code $curl_exit_code" >> "$ERROR_FILE"
+#         rm -f "$OUTPUT_FILE"
+#         continue
+#     fi
+
+#     # Check HTTP status code
+#     if [ "$http_status" -ne 200 ]; then
+#         echo "$TIMESTAMP: Error: API request for $pokemon failed with HTTP status $http_status" >> "$ERROR_FILE"
+#         rm -f "$OUTPUT_FILE"
+#         continue
+#     fi
+
+#     echo "Successfully fetched data for $pokemon and saved to $OUTPUT_FILE"
+
+#     # Add 1-second delay to avoid rate-limiting
+#     sleep 1
+# done
+
 #!/bin/bash
 
-# Script to fetch data for multiple Pokémon from Pokémon API, save to separate JSON files, and handle rate-limiting
+# Script to fetch data for multiple Pokémon from Pokémon API with retry logic, save to JSON files, and handle rate-limiting
 
 # Define constants
 BASE_API_URL="https://pokeapi.co/api/v2/pokemon"
 ERROR_FILE="errors.txt"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-
-# List of Pokémon
 POKEMON_LIST=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
+MAX_RETRIES=3
+RETRY_DELAY=2
 
 # Check if curl is installed
 if ! command -v curl &> /dev/null; then
@@ -22,26 +71,38 @@ for pokemon in "${POKEMON_LIST[@]}"; do
     OUTPUT_FILE="${pokemon}.json"
     API_URL="${BASE_API_URL}/${pokemon}"
 
-    # Make API request and capture response and HTTP status code
-    response=$(curl -s -L -w "%{http_code}" -o "$OUTPUT_FILE" "$API_URL" 2>&1)
-    http_status=${response##* }
-    curl_exit_code=$?
+    # Retry loop
+    attempt=1
+    success=0
+    while [ $attempt -le $MAX_RETRIES ]; do
+        # Make API request and capture response and HTTP status code
+        response=$(curl -s -L -w "%{http_code}" -o "$OUTPUT_FILE" "$API_URL" 2>&1)
+        http_status=${response##* }
+        curl_exit_code=$?
 
-    # Check for curl errors
-    if [ $curl_exit_code -ne 0 ]; then
-        echo "$TIMESTAMP: Error: curl failed for $pokemon with exit code $curl_exit_code" >> "$ERROR_FILE"
-        rm -f "$OUTPUT_FILE"
+        # Check for success
+        if [ $curl_exit_code -eq 0 ] && [ "$http_status" -eq 200 ]; then
+            echo "Successfully fetched data for $pokemon and saved to $OUTPUT_FILE"
+            success=1
+            break
+        fi
+
+        # Log failure for this attempt
+        echo "$TIMESTAMP: Error: Attempt $attempt for $pokemon failed (curl exit code: $curl_exit_code, HTTP status: $http_status)" >> "$ERROR_FILE"
+        rm -f "$OUTPUT_FILE" # Remove incomplete file
+
+        # Increment attempt and wait before retry
+        attempt=$((attempt + 1))
+        if [ $attempt -le $MAX_RETRIES ]; then
+            sleep $RETRY_DELAY
+        fi
+    done
+
+    # Check if all attempts failed
+    if [ $success -eq 0 ]; then
+        echo "$TIMESTAMP: Error: Failed to fetch data for $pokemon after $MAX_RETRIES attempts" >> "$ERROR_FILE"
         continue
     fi
-
-    # Check HTTP status code
-    if [ "$http_status" -ne 200 ]; then
-        echo "$TIMESTAMP: Error: API request for $pokemon failed with HTTP status $http_status" >> "$ERROR_FILE"
-        rm -f "$OUTPUT_FILE"
-        continue
-    fi
-
-    echo "Successfully fetched data for $pokemon and saved to $OUTPUT_FILE"
 
     # Add 1-second delay to avoid rate-limiting
     sleep 1
