@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# Script to summarize Pokémon data from JSON files into a CSV and calculate averages
+
+# Define constants
+OUTPUT_FILE="report.csv"
+ERROR_FILE="errors.txt"
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+POKEMON_FILES=("bulbasaur.json" "ivysaur.json" "venusaur.json" "charmander.json" "charmeleon.json")
+
+# Check if jq is installed
+if ! command -v jq &> /dev/null; then
+    echo "$TIMESTAMP: Error: jq is not installed." >> "$ERROR_FILE"
+    exit 1
+fi
+
+# Check if awk is installed
+if ! command -v awk &> /dev/null; then
+    echo "$TIMESTAMP: Error: awk is not installed." >> "$ERROR_FILE"
+    exit 1
+fi
+
+# Initialize CSV file with headers
+echo "name,height,weight" > "$OUTPUT_FILE"
+
+# Loop through JSON files
+for file in "${POKEMON_FILES[@]}"; do
+    # Check if file exists
+    if [ ! -f "$file" ]; then
+        echo "$TIMESTAMP: Error: $file does not exist." >> "$ERROR_FILE"
+        continue
+    fi
+
+    # Extract name, height, weight using jq
+    data=$(jq -r '[.name, .height, .weight] | @csv' "$file" 2>> "$ERROR_FILE")
+    jq_exit_code=$?
+
+    # Check if jq parsing succeeded
+    if [ $jq_exit_code -ne 0 ]; then
+        echo "$TIMESTAMP: Error: Failed to parse $file with jq." >> "$ERROR_FILE"
+        continue
+    fi
+
+    # Append to CSV
+    echo "$data" >> "$OUTPUT_FILE"
+done
+
+# Check if CSV has data (beyond header)
+if [ $(wc -l < "$OUTPUT_FILE") -le 1 ]; then
+    echo "$TIMESTAMP: Error: No valid data extracted for CSV." >> "$ERROR_FILE"
+    exit 1
+fi
+
+# Calculate averages using awk
+# Skip header, sum height (field 2) and weight (field 3), divide by number of records
+averages=$(awk -F',' 'NR>1 {height_sum+=$2; weight_sum+=$3; count++} END {printf "Average height: %.1f\nAverage weight: %.1f\n", height_sum/count, weight_sum/count}' "$OUTPUT_FILE")
+
+# Print averages
+echo "$averages"
